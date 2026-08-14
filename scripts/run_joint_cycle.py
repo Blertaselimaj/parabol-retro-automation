@@ -30,7 +30,9 @@ from parabol_retro_automation import (  # noqa: E402
     close_meeting,
     find_active_meeting,
     find_team,
+    find_team_member_by_email,
     find_template,
+    promote_facilitator,
     start_meeting,
 )
 
@@ -39,6 +41,15 @@ from parabol_retro_automation import (  # noqa: E402
 # script -- only the joint cycle, per how this automation was scoped.
 ANCHOR_JOINT_DATE = date(2026, 9, 10)
 JOINT_CYCLE_DAYS = 84  # 12 weeks
+
+# Facilitator rotation: Tim goes first (the Sept 10, 2026 cycle, cycle 0), then
+# Marijn, alternating every cycle after that. Facilitator = per-meeting control
+# over advancing stages/ending the meeting in Parabol -- separate from Parabol's
+# team-level "Team Lead" flag. See SKILL.md for the full explanation.
+FACILITATOR_ROTATION = [
+    "timvanhouten@prime-rts.com",
+    "marijnbruggeman@prime-rts.com",
+]
 
 STATE_PATH = os.path.join(os.path.dirname(__file__), "..", "state", "latest.json")
 
@@ -52,6 +63,14 @@ def next_joint_date(today):
     while candidate < today:
         candidate += timedelta(days=JOINT_CYCLE_DAYS)
     return candidate
+
+
+def facilitator_for(joint_date):
+    """Which rotation slot is due for a given joint retro date. Cycle 0 (the
+    Sept 10, 2026 anchor date itself) gets FACILITATOR_ROTATION[0] (Tim);
+    every cycle after that alternates."""
+    cycles_since_anchor = round((joint_date - ANCHOR_JOINT_DATE).days / JOINT_CYCLE_DAYS)
+    return FACILITATOR_ROTATION[cycles_since_anchor % len(FACILITATOR_ROTATION)]
 
 
 def load_state():
@@ -99,6 +118,27 @@ def main():
 
     meeting_id = start_meeting(token, team["id"], template["id"], f"Joint Quarterly Retro - {joint_date}")
     invite_link = f"https://action.parabol.co/meet/{meeting_id}"
+    print(f"Started new meeting for {joint_date}: {invite_link}")
+
+    # Assign this cycle's facilitator (rotates Tim -> Marijn -> Tim -> ...).
+    # This only controls who can advance stages/end the meeting in Parabol --
+    # it does not affect who can add reflections (everyone still can).
+    facilitator_email = facilitator_for(joint_date)
+    print(f"This cycle's facilitator (by rotation): {facilitator_email}")
+    facilitator_assigned = False
+    facilitator_note = None
+    match = find_team_member_by_email(token, team["id"], facilitator_email)
+    if not match:
+        facilitator_note = (
+            f"{facilitator_email} has not accepted their Parabol team invite yet -- "
+            f"facilitator NOT set. Have them accept the invite, then re-run this "
+            f"workflow manually (Actions tab -> Run workflow) or set the facilitator "
+            f"by hand in Parabol for this meeting."
+        )
+        print(f"  ! {facilitator_note}")
+    else:
+        promote_facilitator(token, meeting_id, match["userId"])
+        facilitator_assigned = True
 
     new_state = {
         "cycle_date": str(joint_date),
@@ -108,9 +148,11 @@ def main():
         "topics": [p["question"] for p in template["prompts"]],
         "team_name": team["name"],
         "template_name": template["name"],
+        "facilitator_email": facilitator_email,
+        "facilitator_assigned": facilitator_assigned,
+        "facilitator_note": facilitator_note,
     }
     save_state(new_state)
-    print(f"Started new meeting for {joint_date}: {invite_link}")
 
 
 if __name__ == "__main__":
