@@ -1,0 +1,37 @@
+name: Quarterly Retro Automation
+
+on:
+  schedule:
+    # Runs once daily at 07:00 UTC (~09:00 Belgrade time). Cheap to run daily --
+    # the script itself checks whether today is actually the trigger date, so
+    # this file never needs to change for future cycles.
+    - cron: '0 7 * * *'
+  workflow_dispatch: {}  # lets you also run it manually from the Actions tab, for testing
+
+permissions:
+  contents: write  # needed so the workflow can commit the updated state file
+
+jobs:
+  check-and-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check today's date and start a new meeting if it's time
+        env:
+          PARABOL_TOKEN: ${{ secrets.PARABOL_TOKEN }}
+        run: python scripts/run_joint_cycle.py
+
+      - name: Commit updated state, if anything changed
+        run: |
+          git config user.name "retro-automation-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add state/latest.json
+          git diff --cached --quiet || git commit -m "Update retro state for next cycle"
+          git push
