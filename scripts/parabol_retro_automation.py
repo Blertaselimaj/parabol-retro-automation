@@ -185,64 +185,6 @@ def close_meeting(token, meeting_id):
     if result.get("error"):
         raise SystemExit(f"endRetrospective failed: {result['error']['message']}")
     print(f"Closed meeting id={meeting_id}")
-def list_team_members(token, team_id):
-    data = gql(token, """
-        query($teamId: ID!) {
-          viewer {
-            team(teamId: $teamId) {
-              teamLead { userId user { preferredName email } }
-              teamMembers {
-                userId
-                isLead
-                user { preferredName email }
-              }
-              teamInvitations {
-                email
-                acceptedAt
-                expiresAt
-              }
-            }
-          }
-        }
-    """, {"teamId": team_id})
-    team = data["viewer"]["team"]
-    print(f"Team lead (Parabol's own team-level role): {team['teamLead']['user']['preferredName']} "
-          f"<{team['teamLead']['user']['email']}> (userId={team['teamLead']['userId']})")
-    print("All team members:")
-    for m in team["teamMembers"]:
-        lead_tag = " [LEAD]" if m["isLead"] else ""
-        print(f"  - {m['user']['preferredName']} <{m['user']['email']}>  userId={m['userId']}{lead_tag}")
-    invitations = team.get("teamInvitations") or []
-    if invitations:
-        print("Pending/past invitations (not yet full members until accepted):")
-        for inv in invitations:
-            status = f"accepted at {inv['acceptedAt']}" if inv.get("acceptedAt") else f"NOT YET ACCEPTED (expires {inv['expiresAt']})"
-            print(f"  - {inv['email']}  {status}")
-def find_team_member_by_email(token, team_id, email):
-    """Look up a team member's Parabol userId by email. Returns the member dict
-    (with at least userId/user.email) or None if no accepted team member matches.
-    Note: this only searches teamMembers (people who accepted their invite) --
-    it does NOT match pending teamInvitations, since those have no userId yet."""
-    data = gql(token, """
-        query($teamId: ID!) {
-          viewer { team(teamId: $teamId) { teamMembers { userId user { email preferredName } } } }
-        }
-    """, {"teamId": team_id})
-    wanted = email.strip().lower()
-    return next((m for m in data["viewer"]["team"]["teamMembers"]
-                 if m["user"]["email"].strip().lower() == wanted), None)
-def promote_facilitator(token, meeting_id, facilitator_user_id):
-    data = gql(token, """
-        mutation($meetingId: ID!, $facilitatorUserId: ID!) {
-          promoteNewMeetingFacilitator(meetingId: $meetingId, facilitatorUserId: $facilitatorUserId) {
-            error { message }
-          }
-        }
-    """, {"meetingId": meeting_id, "facilitatorUserId": facilitator_user_id})
-    result = data["promoteNewMeetingFacilitator"]
-    if result.get("error"):
-        raise SystemExit(f"promoteNewMeetingFacilitator failed: {result['error']['message']}")
-    print(f"Facilitator for meeting {meeting_id} set to userId={facilitator_user_id}")
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--team", default=DEFAULT_TEAM_NAME)
@@ -250,11 +192,9 @@ def main():
     ap.add_argument("--meeting-name", default=None, help="Name for a newly started meeting (optional)")
     ap.add_argument("--responses", help="CSV file with columns: name, topic, comment")
     ap.add_argument("--close-meeting", metavar="MEETING_ID", help="End/close an existing (e.g. stale) meeting by id before doing anything else")
-    ap.add_argument("--facilitator-email", metavar="EMAIL", help="With --run: after starting/resuming the meeting, hand facilitator control (the only role that can advance stages or end the meeting) to this team member")
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--discover", action="store_true", help="Read-only: report team/template/active-meeting state, make no changes")
     mode.add_argument("--run", action="store_true", help="Start/resume the meeting and push reflections from --responses")
-    mode.add_argument("--list-members", action="store_true", help="Read-only: list team members and their Parabol userIds (needed for --facilitator-email lookups)")
     args = ap.parse_args()
     token = os.environ.get("PARABOL_TOKEN")
     if not token:
@@ -262,10 +202,6 @@ def main():
     if args.close_meeting:
         close_meeting(token, args.close_meeting)
     team = find_team(token, args.team)
-    if args.list_members:
-        print(f"Team: {team['name']} (id={team['id']})")
-        list_team_members(token, team["id"])
-        return
     print(f"Team: {team['name']} (id={team['id']})")
     template = find_template(token, team["id"], args.template)
     print(f"Template: {template['name']} (id={template['id']})")
@@ -291,13 +227,6 @@ def main():
         print(f"Started new meeting id={meeting_id}")
     invite_link = f"https://action.parabol.co/meet/{meeting_id}"
     print(f"Invite link: {invite_link}")
-    if args.facilitator_email:
-        match = find_team_member_by_email(token, team["id"], args.facilitator_email)
-        if not match:
-            print(f"  ! could not find a team member with email {args.facilitator_email} -- facilitator NOT changed "
-                  f"(they may not have accepted their Parabol invite yet)")
-        else:
-            promote_facilitator(token, meeting_id, match["userId"])
     if args.responses:
         if not os.path.exists(args.responses):
             raise SystemExit(f"Responses file not found: {args.responses}")
