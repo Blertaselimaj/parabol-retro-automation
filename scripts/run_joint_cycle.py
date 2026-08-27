@@ -4,18 +4,27 @@ Run joint cycle · PY
 """
 Runs on a daily schedule via GitHub Actions (see .github/workflows/quarterly-retro.yml).
  
-Each run, it checks whether TODAY is the trigger date for the next joint retro
-cycle (2 days before that cycle's reflection deadline). If it is, and this
-cycle hasn't already been handled, it:
-  1. Closes any stale/leftover active meeting for the retro template.
-  2. Starts a fresh meeting for this cycle.
-  3. Writes the result (invite link, topics, deadline) to state/latest.json
-     and commits it back to the repo.
+Each run does two independent self-checks:
  
-A separate scheduled task (running in Claude, not here) reads that state file
-afterward and builds/sends the team survey email. This script's only job is
-the Parabol side — starting/closing meetings — since that requires a real
-internet connection that only a runner like this (not a chat sandbox) has.
+1. Is TODAY the trigger date for the next joint retro cycle (2 days before
+   that cycle's reflection deadline)? If so, and this cycle hasn't already
+   been handled:
+     - Closes any stale/leftover active meeting for the retro template.
+     - Starts a fresh meeting for this cycle.
+     - Writes the result (invite link, topics, deadline) to state/latest.json
+       and commits it back to the repo.
+ 
+2. Is TODAY the day after the most recently started cycle's meeting date,
+   and have that cycle's action items not been posted to Confluence yet?
+   If so, and CONFLUENCE_EMAIL/CONFLUENCE_API_TOKEN secrets are set:
+     - Reads the action items ("tasks") recorded in Parabol for that
+       meeting and appends them as a new dated section on the team's
+       Confluence action-items page.
+ 
+A separate scheduled task (running in Claude, not here) reads state/latest.json
+afterward and builds/sends the team survey email. This script's job is
+everything that needs a real internet connection that only a runner like
+this (not a chat sandbox) has -- the Parabol side, and now Confluence.
  
 On every other day, this script does nothing and exits quietly. It's safe
 to run daily indefinitely; it does not need to be updated for future cycles.
@@ -37,6 +46,7 @@ from parabol_retro_automation import (  # noqa: E402
     promote_facilitator,
     start_meeting,
 )
+from confluence_actions import post_action_items  # noqa: E402
  
 # The underlying "Retrospective Data team" meeting happens every ~4 weeks on
 # Thursday (confirmed against the actual recurring calendar series); every
@@ -111,20 +121,17 @@ def save_state(state):
         f.write("\n")
  
  
-def main():
-    token = os.environ.get("PARABOL_TOKEN")
-    if not token:
-        raise SystemExit("PARABOL_TOKEN secret is not set for this workflow.")
- 
-    today = date.today()
+def maybe_start_new_cycle(token, today):
+    """Check 1: is today the trigger date for the next joint retro cycle?
+    If so and it hasn't been started yet, start it and save state."""
     joint_date = next_joint_date(today)
     deadline = joint_date - timedelta(days=1)
     trigger_date = deadline - timedelta(days=2)
  
-    print(f"Today: {today}. Next joint retro: {joint_date}. Deadline: {deadline}. Trigger date: {trigger_date}.")
+    print(f"Next joint retro: {joint_date}. Deadline: {deadline}. Trigger date: {trigger_date}.")
  
     if today != trigger_date:
-        print("Not the trigger date yet -- nothing to do today.")
+        print("Not the trigger date yet -- nothing to start today.")
         return
  
     state = load_state()
@@ -175,12 +182,62 @@ def main():
         "facilitator_email": facilitator_email,
         "facilitator_assigned": facilitator_assigned,
         "facilitator_note": facilitator_note,
+        "action_items_posted_for": None,
     }
     save_state(new_state)
+ 
+ 
+def maybe_post_action_items(token, today):
+    """Check 2: is today the day after the most recently started cycle's
+    meeting date, and have that cycle's action items not been posted to
+    Confluence yet? If so and the Confluence secrets are set, post them."""
+    confluence_email = os.environ.get("CONFLUENCE_EMAIL")
+    confluence_api_token = os.environ.get("CONFLUENCE_API_TOKEN")
+    if not confluence_email or not confluence_api_token:
+        print("CONFLUENCE_EMAIL / CONFLUENCE_API_TOKEN not set -- skipping action-items step.")
+        return
+ 
+    state = load_state()
+    state_cycle_date = state.get("cycle_date")
+    state_meeting_id = state.get("meeting_id")
+    if not state_cycle_date or not state_meeting_id:
+        print("No cycle recorded in state yet -- nothing to post to Confluence.")
+        return
+ 
+    cycle_date_obj = date.fromisoformat(state_cycle_date)
+    post_date = cycle_date_obj + timedelta(days=1)
+ 
+    if state.get("action_items_posted_for") == state_cycle_date:
+        print(f"Action items for the {state_cycle_date} cycle were already posted -- nothing to do.")
+        return
+    if today != post_date:
+        print(f"Not yet the day to post action items for the {state_cycle_date} cycle (that's {post_date}).")
+        return
+ 
+    print(f"Posting action items for the {state_cycle_date} joint retro to Confluence...")
+    try:
+        post_action_items(token, confluence_email, confluence_api_token, state_meeting_id, cycle_date_obj)
+    except SystemExit as e:
+        print(f"  ! failed to post action items to Confluence: {e}")
+        return
+    state["action_items_posted_for"] = state_cycle_date
+    save_state(state)
+    print("Action items posted to Confluence.")
+ 
+ 
+def main():
+    token = os.environ.get("PARABOL_TOKEN")
+    if not token:
+        raise SystemExit("PARABOL_TOKEN secret is not set for this workflow.")
+ 
+    today = date.today()
+    print(f"Today: {today}.")
+ 
+    maybe_start_new_cycle(token, today)
+    maybe_post_action_items(token, today)
  
  
 if __name__ == "__main__":
     main()
  
 
-Unable to open file.
