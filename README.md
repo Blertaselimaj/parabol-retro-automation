@@ -30,6 +30,3 @@ In the repo: Settings -> Actions -> General -> under "Workflow permissions", sel
 That's it. The workflow runs automatically every day at 07:00 UTC. You can also trigger it manually any time from the repo's "Actions" tab -> "Quarterly Retro Automation" -> "Run workflow", to test it without waiting.
 What I need from you afterward
 Once this is set up, tell me the repo's owner and name (e.g. blertaselimaj/parabol-retro-automation) so I can read state/latest.json from it and set up the scheduled task that turns it into the team survey email.
-
-
-
