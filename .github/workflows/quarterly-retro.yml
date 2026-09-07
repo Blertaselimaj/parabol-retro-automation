@@ -1,5 +1,3 @@
-
-Quarterly retro · YML
 name: Quarterly Retro Automation
 on:
   schedule:
