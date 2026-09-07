@@ -1,7 +1,6 @@
 
 Quarterly retro · YML
 name: Quarterly Retro Automation
- 
 on:
   schedule:
     # Runs once daily at 07:00 UTC (~09:00 Belgrade time). Cheap to run daily --
