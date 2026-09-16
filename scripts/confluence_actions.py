@@ -1,5 +1,3 @@
-
-Confluence actions · PY
 #!/usr/bin/env python3
 """
 Posts a joint retro's action items (Parabol "tasks" created during the meeting)

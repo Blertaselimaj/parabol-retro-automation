@@ -1,5 +1,3 @@
-
-Run joint cycle · PY
 #!/usr/bin/env python3
 """
 Runs on a daily schedule via GitHub Actions (see .github/workflows/quarterly-retro.yml).
